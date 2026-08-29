@@ -1,0 +1,7 @@
+.env
+.env.*
+data/
+moders.json
+moders_test.json
+*.pyc
+__pycache__/
