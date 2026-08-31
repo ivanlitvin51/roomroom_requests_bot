@@ -1,4 +1,5 @@
 import telebot
+from telebot import types
 import requests
 import json
 import os
@@ -8,7 +9,7 @@ import time
 import requests
 from dotenv import load_dotenv
 
-load_dotenv('.env.prod')
+load_dotenv('.env.test')
 
 # --- НАСТРОЙКИ ---
 TOKEN = os.getenv('TOKEN')
@@ -109,7 +110,11 @@ def handle_all_messages(message):
 def notify_single(chat_id, text):
     """Отправляет сообщение конкретному пользователю и возвращает True в случае успеха."""
     try:
-        bot.send_message(chat_id, text)
+        markup = types.InlineKeyboardMarkup()
+        btn = types.InlineKeyboardButton("🛠 Взять в работу", callback_data="take_order")
+        markup.add(btn)
+
+        bot.send_message(chat_id, text, reply_markup=markup)
         return True
     except Exception as e:
         print(f"Не удалось отправить сообщение для {chat_id}: {e}")
@@ -282,6 +287,21 @@ def check_new_chats():
         print(f"❌ Ошибка в check_new_chats: {e}")
 
 
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    print(f"DEBUG: Получен callback с данными: {call.data}")
+    if call.data == "take_order":
+        bot.answer_callback_query(call.id, "Заявка закреплена за вами!")
+
+        new_text = call.message.text + f"\n\n👤 Взял в работу: @{call.from_user.username or call.from_user.first_name}"
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=new_text,
+            reply_markup=None
+        )
+
+
 def background_checker():
   """Фоновый цикл: проверяет заявки и чаты каждые TIME_FREEZE секунд."""
   print(f"🔄 Фоновый мониторинг заявок и чатов запущен (интервал: {TIME_FREEZE} сек)...")
@@ -296,7 +316,7 @@ if __name__ == '__main__':
     checker_thread.daemon = True
     checker_thread.start()
     
-    print("🤖 Бот успешно запущен и слушает события...")
+    print("[ТЕСТ]🤖 Бот успешно запущен и слушает события... [ТЕСТ]")
     
     # В добавок в случае дропа сети есть бесконечный реконнект
     while True:

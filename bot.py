@@ -1,4 +1,5 @@
 import telebot
+from telebot import types
 import requests
 import json
 import os
@@ -14,6 +15,9 @@ load_dotenv('.env.prod')
 TOKEN = os.getenv('TOKEN')
 SECRET_KEY = os.getenv('SECRET_KEY')
 TIME_FREEZE = 15
+
+# --- ГЛОБАЛЬНЫ ПЕРЕМЕННЫЕ И ФЛАГИ ---
+IS_ONLINE = False
 
 # API эндпоинты для опроса бэкенда
 API_URL_REQUESTS = os.getenv('API_URL_REQUESTS')
@@ -108,10 +112,23 @@ def handle_all_messages(message):
 
 def notify_single(chat_id, text):
     """Отправляет сообщение конкретному пользователю и возвращает True в случае успеха."""
+    global IS_ONLINE
     try:
-        bot.send_message(chat_id, text)
+        markup = types.InlineKeyboardMarkup()
+        btn = types.InlineKeyboardButton("🛠 Взять в работу", callback_data="take_order")
+        markup.add(btn)
+
+        bot.send_message(chat_id, text, reply_markup=markup)
+
+        if not IS_ONLINE:
+            print("✅ Соединение с Telegram успешно восстановлено!")
+            IS_ONLINE = True
+
         return True
     except Exception as e:
+        if IS_ONLINE:
+            print(f"⚠️ Потеряно соединение с Telegram: {e}")
+            IS_ONLINE = False
         print(f"Не удалось отправить сообщение для {chat_id}: {e}")
         return False
 
@@ -282,13 +299,55 @@ def check_new_chats():
         print(f"❌ Ошибка в check_new_chats: {e}")
 
 
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    """Закрепление заявки за человеком"""
+    print(f"DEBUG: Получен callback с данными: {call.data}")
+    if call.data == "take_order":
+        bot.answer_callback_query(call.id, "Заявка закреплена за вами!")
+
+        new_text = call.message.text + f"\n\n👤 Взял в работу: @{call.from_user.username or call.from_user.first_name}"
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=new_text,
+            reply_markup=None
+        )
+
+
+def check_telegram_connection():
+    """Пинги тг в случае падения сети"""
+    global IS_ONLINE
+    try:
+        tg_response = bot.get_me()
+
+        if not IS_ONLINE and tg_response:
+            print("✅ Соединение с Telegram успешно установлено!")
+            IS_ONLINE = True
+
+        return True
+    except Exception as e:
+        if IS_ONLINE:
+
+            print(f"⚠️ Обнаружен обрыв связи с Telegram: {e}")
+            IS_ONLINE = False
+        return False
+
+
 def background_checker():
   """Фоновый цикл: проверяет заявки и чаты каждые TIME_FREEZE секунд."""
   print(f"🔄 Фоновый мониторинг заявок и чатов запущен (интервал: {TIME_FREEZE} сек)...")
   while True:
-    check_new_applications()
-    check_new_chats()
+    check_telegram_connection()
+
+    try:
+        check_new_applications()
+        check_new_chats()
+    except Exception as e:
+        print(f"❌ Ошибка в чекерах: {e}")
+
     time.sleep(TIME_FREEZE)
+
 
 if __name__ == '__main__':
     # Фоновый поток
@@ -303,5 +362,8 @@ if __name__ == '__main__':
         try:
             bot.infinity_polling(skip_pending=True, timeout=10, long_polling_timeout=5)
         except Exception as e:
-            print(f"⚠️ Ошибка соединения с Telegram: {e}. Переподключение через 5 секунд...")
+            if IS_ONLINE:
+                print(f"⚠️ Ошибка соединения с Telegram: {e}. Переподключение через 5 секунд...")
+                IS_ONLINE = False
+
             time.sleep(5)
