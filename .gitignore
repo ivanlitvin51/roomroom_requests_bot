@@ -1,7 +1,10 @@
 .env
 .env.*
+!.env.example
 data/
 moders.json
 moders_test.json
 *.pyc
 __pycache__/
+admin/node_modules/
+admin/dist/
