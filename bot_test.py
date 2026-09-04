@@ -8,3 +8,6 @@ if '--test' not in sys.argv:
     sys.argv.append('--test')
 
 import bot
+
+if __name__ == '__main__':
+    bot.main()

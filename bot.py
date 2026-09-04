@@ -2,11 +2,19 @@ import os
 import sys
 import json
 import time
+
+# Корректный вывод эмодзи и юникода в консоль Windows
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 import threading
 import requests
 from dotenv import load_dotenv
 import telebot
-from telebot import types
+from telebot import apihelper, types
 from telebot.apihelper import ApiTelegramException
 
 # --- ОПРЕДЕЛЕНИЕ ПУТЕЙ И РЕЖИМА ЗАПУСКА ---
@@ -58,6 +66,11 @@ HEADERS = {
     'Authorization': f'Bearer {ADMIN_TOKEN}',
     'Accept': 'application/json'
 }
+
+# Прокси для Telegram (если системный прокси блокирует или искажает запросы)
+TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY')
+if TELEGRAM_PROXY:
+    apihelper.proxy = {'https': TELEGRAM_PROXY, 'http': TELEGRAM_PROXY}
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -181,6 +194,10 @@ def check_new_applications():
     try:
         response = requests.get(API_URL_REQUESTS, headers=HEADERS, timeout=10)
         if response.status_code != 200:
+            if response.status_code == 401:
+                print("❌ Ошибка API заявок: 401 Unauthorized. ADMIN_TOKEN истёк или недействителен!")
+            else:
+                print(f"⚠️ Ошибка API заявок: HTTP {response.status_code} - {response.text[:200]}")
             return
 
         data = response.json()
@@ -254,6 +271,10 @@ def check_new_chats():
     try:
         response = requests.get(API_URL_CHATS, headers=HEADERS, timeout=10)
         if response.status_code != 200:
+            if response.status_code == 401:
+                print("❌ Ошибка API чатов: 401 Unauthorized. ADMIN_TOKEN истёк или недействителен!")
+            else:
+                print(f"⚠️ Ошибка API чатов: HTTP {response.status_code} - {response.text[:200]}")
             return
 
         data = response.json()
@@ -385,13 +406,15 @@ def background_checker():
         time.sleep(TIME_FREEZE)
 
 
-if __name__ == '__main__':
+def main():
     mode_title = "ТЕСТОВЫЙ РЕЖИМ" if IS_TEST else "ПРОДАКШН"
     print("=" * 60)
     print(f"🚀 Запуск бота в режиме: [{mode_title}]")
     print(f"📄 Конфигурация: {ENV_FILE}")
     print(f"📂 Файл модераторов: {MODERS_FILE}")
     print(f"📂 Файлы ID: {LAST_ID_FILE}, {LAST_CHAT_ID_FILE}")
+    if TELEGRAM_PROXY:
+        print(f"🌐 Прокси Telegram: {TELEGRAM_PROXY}")
     print("=" * 60)
 
     # Фоновый поток
@@ -411,3 +434,7 @@ if __name__ == '__main__':
                 IS_ONLINE = False
 
             time.sleep(5)
+
+
+if __name__ == '__main__':
+    main()
