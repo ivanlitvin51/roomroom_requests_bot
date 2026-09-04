@@ -67,7 +67,15 @@ HEADERS = {
     'Accept': 'application/json'
 }
 
-# Прокси для Telegram (если системный прокси блокирует или искажает запросы)
+# Настройки подключения к Telegram: Cloudflare Worker или локальный прокси
+TELEGRAM_API_URL = os.getenv('TELEGRAM_API_URL')
+if TELEGRAM_API_URL:
+    base_url = TELEGRAM_API_URL.rstrip('/')
+    apihelper.API_URL = f"{base_url}/bot{{0}}/{{1}}"
+    # Отключаем системный прокси, чтобы запросы к Worker шли напрямую
+    if not os.getenv('TELEGRAM_PROXY'):
+        apihelper.proxy = {'https': None, 'http': None}
+
 TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY')
 if TELEGRAM_PROXY:
     apihelper.proxy = {'https': TELEGRAM_PROXY, 'http': TELEGRAM_PROXY}
@@ -413,7 +421,9 @@ def main():
     print(f"📄 Конфигурация: {ENV_FILE}")
     print(f"📂 Файл модераторов: {MODERS_FILE}")
     print(f"📂 Файлы ID: {LAST_ID_FILE}, {LAST_CHAT_ID_FILE}")
-    if TELEGRAM_PROXY:
+    if TELEGRAM_API_URL:
+        print(f"🌐 Telegram API URL (Cloudflare Worker): {TELEGRAM_API_URL}")
+    elif TELEGRAM_PROXY:
         print(f"🌐 Прокси Telegram: {TELEGRAM_PROXY}")
     print("=" * 60)
 
