@@ -58,14 +58,96 @@ MODERS_FILE = resolve_path(os.getenv('MODERS_FILE', 'moders.json'))
 LAST_ID_FILE = resolve_path(os.getenv('LAST_ID_FILE', 'data/last_id.txt'))
 LAST_CHAT_ID_FILE = resolve_path(os.getenv('LAST_CHAT_ID_FILE', 'data/last_chat_id.txt'))
 
-# Токен администратора для авторизации запросов к API
+# Токен и учетные данные администратора для авторизации к API RoomRoom
 ADMIN_TOKEN = os.getenv('ADMIN_TOKEN')
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
+API_URL_LOGIN = os.getenv('API_URL_LOGIN', 'https://room-room.app/api/auth/login')
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    'Authorization': f'Bearer {ADMIN_TOKEN}',
+    'Authorization': f'Bearer {ADMIN_TOKEN}' if ADMIN_TOKEN else '',
     'Accept': 'application/json'
 }
+
+def _update_env_token(new_token):
+    """Обновляет значение ADMIN_TOKEN в файле конфигурации .env."""
+    try:
+        if not os.path.exists(ENV_FILE):
+            return
+        with open(ENV_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        import re
+        if re.search(r'^ADMIN_TOKEN\s*=', content, flags=re.MULTILINE):
+            new_content = re.sub(
+                r'^ADMIN_TOKEN\s*=.*$',
+                f'ADMIN_TOKEN = "{new_token}"',
+                content,
+                flags=re.MULTILINE
+            )
+        else:
+            new_content = content + f'\nADMIN_TOKEN = "{new_token}"\n'
+
+        with open(ENV_FILE, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+    except Exception as e:
+        print(f"⚠️ Не удалось сохранить обновленный токен в {ENV_FILE}: {e}")
+
+def login_admin():
+    """Выполняет авторизацию на бэкенде RoomRoom и обновляет ADMIN_TOKEN."""
+    global ADMIN_TOKEN, HEADERS
+    if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+        return False
+
+    try:
+        payload = {
+            'email': ADMIN_EMAIL,
+            'password': ADMIN_PASSWORD
+        }
+        resp = requests.post(
+            API_URL_LOGIN,
+            json=payload,
+            headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'},
+            timeout=10
+        )
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            token = data.get('accessToken') or data.get('token')
+            if token:
+                ADMIN_TOKEN = token
+                HEADERS['Authorization'] = f'Bearer {ADMIN_TOKEN}'
+                print("🔑 ADMIN_TOKEN успешно обновлён через API авторизации!")
+                _update_env_token(token)
+                return True
+            else:
+                print(f"⚠️ Ответ авторизации не содержит accessToken: {resp.text[:200]}")
+                return False
+        else:
+            print(f"❌ Ошибка авторизации ({resp.status_code}): {resp.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"❌ Исключение при авторизации: {e}")
+        return False
+
+def ensure_authenticated():
+    """Проверяет токен при старте и логинится, если он отсутствует или истёк."""
+    global ADMIN_TOKEN
+    if not ADMIN_TOKEN:
+        if ADMIN_EMAIL and ADMIN_PASSWORD:
+            print("🔑 ADMIN_TOKEN отсутствует, выполняем вход по логину/паролю...")
+            return login_admin()
+        return False
+
+    if ADMIN_EMAIL and ADMIN_PASSWORD:
+        try:
+            resp = requests.get('https://room-room.app/api/auth/me', headers=HEADERS, timeout=5)
+            if resp.status_code == 401:
+                print("🔑 Текущий ADMIN_TOKEN истёк, выполняем вход по логину/паролю...")
+                return login_admin()
+        except Exception:
+            pass
+    return True
 
 # Настройки подключения к Telegram: Cloudflare Worker или локальный прокси
 TELEGRAM_API_URL = os.getenv('TELEGRAM_API_URL')
@@ -201,11 +283,16 @@ def check_new_applications():
     
     try:
         response = requests.get(API_URL_REQUESTS, headers=HEADERS, timeout=10)
-        if response.status_code != 200:
+        if response.status_code == 401:
+            if ADMIN_EMAIL and ADMIN_PASSWORD:
+                print("⚠️ ADMIN_TOKEN истёк (401). Выполняем авто-обновление через логин...")
+                if login_admin():
+                    response = requests.get(API_URL_REQUESTS, headers=HEADERS, timeout=10)
             if response.status_code == 401:
                 print("❌ Ошибка API заявок: 401 Unauthorized. ADMIN_TOKEN истёк или недействителен!")
-            else:
-                print(f"⚠️ Ошибка API заявок: HTTP {response.status_code} - {response.text[:200]}")
+                return
+        elif response.status_code != 200:
+            print(f"⚠️ Ошибка API заявок: HTTP {response.status_code} - {response.text[:200]}")
             return
 
         data = response.json()
@@ -278,11 +365,16 @@ def check_new_chats():
 
     try:
         response = requests.get(API_URL_CHATS, headers=HEADERS, timeout=10)
-        if response.status_code != 200:
+        if response.status_code == 401:
+            if ADMIN_EMAIL and ADMIN_PASSWORD:
+                print("⚠️ ADMIN_TOKEN истёк (401). Выполняем авто-обновление через логин...")
+                if login_admin():
+                    response = requests.get(API_URL_CHATS, headers=HEADERS, timeout=10)
             if response.status_code == 401:
                 print("❌ Ошибка API чатов: 401 Unauthorized. ADMIN_TOKEN истёк или недействителен!")
-            else:
-                print(f"⚠️ Ошибка API чатов: HTTP {response.status_code} - {response.text[:200]}")
+                return
+        elif response.status_code != 200:
+            print(f"⚠️ Ошибка API чатов: HTTP {response.status_code} - {response.text[:200]}")
             return
 
         data = response.json()
@@ -425,7 +517,14 @@ def main():
         print(f"🌐 Telegram API URL (Cloudflare Worker): {TELEGRAM_API_URL}")
     elif TELEGRAM_PROXY:
         print(f"🌐 Прокси Telegram: {TELEGRAM_PROXY}")
+    if ADMIN_EMAIL:
+        print(f"👤 Авторизация API: {ADMIN_EMAIL} (авто-обновление токена активно)")
+    else:
+        print(f"🔑 Авторизация API: токен (без авто-обновления)")
     print("=" * 60)
+
+    # Проверка и актуализация токена API
+    ensure_authenticated()
 
     # Фоновый поток
     checker_thread = threading.Thread(target=background_checker)
